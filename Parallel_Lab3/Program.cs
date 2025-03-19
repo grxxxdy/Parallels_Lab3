@@ -28,7 +28,7 @@ class Program
     {
         Random rand = new Random();
 
-        int timeToWait = rand.Next(600, 1200) * 1000;
+        int timeToWait = rand.Next(6, 12) * 1000;
         
         Thread.Sleep(timeToWait);
 

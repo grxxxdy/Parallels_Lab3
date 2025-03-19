@@ -50,12 +50,12 @@ public class ThreadPool : IDisposable
         
         Random rand = new Random();
 
-        int index = rand.Next(0, _queues.Count);        
+        int startIndex = rand.Next(0, _queues.Count);        
         
         // Selected random queue, if it's full -> iterate through others
         for (int i = 0; i < _queues.Count; i++)
         {
-            index = (index + i) % _queues.Count;
+            int index = (startIndex + i) % _queues.Count;
 
             _queueLocks[index].WaitOne();                   // -----LOCK QUEUE-----
 
