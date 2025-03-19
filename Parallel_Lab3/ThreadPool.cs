@@ -10,7 +10,7 @@ public class ThreadPool : IDisposable
     private bool _shouldInterrupt;
     private int _queueCapacity;
     
-    private List<Mutex> _queueLocks;
+    private List<object> _queueLocks;
     private Mutex _consoleMutex;
 
     private ThreadPoolStats _stats;
@@ -21,7 +21,7 @@ public class ThreadPool : IDisposable
         _queues = new List<Queue<(int, Func<int>, Stopwatch)>>();
         _workers = new List<Thread>();
         _queueCapacity = queueCapacity;
-        _queueLocks = new List<Mutex>();
+        _queueLocks = new List<object>();
         _consoleMutex = new Mutex();
         _stats = stats;
         
@@ -57,27 +57,26 @@ public class ThreadPool : IDisposable
         {
             int index = (startIndex + i) % _queues.Count;
 
-            _queueLocks[index].WaitOne();                   // -----LOCK QUEUE-----
-
-            if (_queues[index].Count < _queueCapacity)
+            lock (_queueLocks[index])                       // -----LOCK QUEUE-----
             {
-                _queues[index].Enqueue((taskId, task, Stopwatch.StartNew()));
-
-                if (_queues[index].Count == _queueCapacity)         // if queue became full then we need to start measuring time
+                if (_queues[index].Count < _queueCapacity)
                 {
-                    _stats.QueueFullStart(index);
-                }
-                
-                _queueLocks[index].ReleaseMutex();          // -----UNLOCK QUEUE-----
+                    _queues[index].Enqueue((taskId, task, Stopwatch.StartNew()));
 
-                _consoleMutex.WaitOne();
-                Console.WriteLine($"[Queue {index}] Task {taskId} has been enqueued.");
-                _consoleMutex.ReleaseMutex();
+                    if (_queues[index].Count == _queueCapacity)         // if queue became full then we need to start measuring time
+                    {
+                        _stats.QueueFullStart(index);
+                    }
                 
-                return;
-            }
-            
-            _queueLocks[index].ReleaseMutex();              // -----UNLOCK QUEUE-----
+                    Monitor.Pulse(_queueLocks[index]);          // -----NOTIFY QUEUE-----
+
+                    _consoleMutex.WaitOne();
+                    Console.WriteLine($"[Queue {index}] Task {taskId} has been enqueued.");
+                    _consoleMutex.ReleaseMutex();
+                
+                    return;
+                }
+            }                                               // -----UNLOCK QUEUE-----            
         }
         
         _consoleMutex.WaitOne();
@@ -91,39 +90,43 @@ public class ThreadPool : IDisposable
     {
         while (!_shouldInterrupt)
         {
-            _queueLocks[queueIndex].WaitOne();                  // -----LOCK QUEUE-----
+            (int taskIndex, Func<int> task, Stopwatch waitTimeStopwatch)? taskToProcess = null;
             
-            if(_queues[queueIndex].Count > 0)
+            lock (_queueLocks[queueIndex])                          // -----LOCK QUEUE-----
             {
-                var (taskIndex, task, waitTimeStopwatch) = _queues[queueIndex].Dequeue();
+                while (_queues[queueIndex].Count == 0 && !_shouldInterrupt)
+                {
+                    Monitor.Wait(_queueLocks[queueIndex]);          // -----WAIT FOR ELEMENT IN QUEUE
+                }
 
-                if (_queues[queueIndex].Count == _queueCapacity - 1)    // if queue was full, then now we need to stop time measure
+                if (_shouldInterrupt) return;
+
+                taskToProcess = _queues[queueIndex].Dequeue();
+
+                if (_queues[queueIndex].Count ==
+                    _queueCapacity - 1) // if queue was full, then now we need to stop time measure
                 {
                     _stats.QueueFullStop(queueIndex);
                 }
+            }                                                       // -----UNLOCK QUEUE-----
+            
+            var (taskIndex, task, waitTimeStopwatch) = taskToProcess.Value;
+            
+            _stats.RecordTaskWaitTime(waitTimeStopwatch);   // Waiting is finished so recrd the time
                 
-                _queueLocks[queueIndex].ReleaseMutex();         // -----UNLOCK QUEUE-----
-                
-                _stats.RecordTaskWaitTime(waitTimeStopwatch);   // Waiting is finished so recrd the time
-                
-                _consoleMutex.WaitOne();
-                Console.WriteLine($"Task {taskIndex} has started.");
-                _consoleMutex.ReleaseMutex();
-                
-                // Execute and measure
-                int executionTime = task.Invoke();
-                _stats.RecordTaskExecutionTime(executionTime);
-                
-                _consoleMutex.WaitOne();
-                Console.WriteLine($"Task {taskIndex} has completed.");
-                _consoleMutex.ReleaseMutex();
+            _consoleMutex.WaitOne();
+            Console.WriteLine($"Task {taskIndex} has started.");
+            _consoleMutex.ReleaseMutex();
+            
+            // Execute and measure
+            int executionTime = task.Invoke();
+            _stats.RecordTaskExecutionTime(executionTime);
+            
+            _consoleMutex.WaitOne();
+            Console.WriteLine($"Task {taskIndex} has completed.");
+            _consoleMutex.ReleaseMutex();
 
-                _stats.AddFinishedTask();
-            }
-            else
-            {
-                _queueLocks[queueIndex].ReleaseMutex();         // -----UNLOCK QUEUE-----
-            }
+            _stats.AddFinishedTask();                                       
         }
     }
 
@@ -144,15 +147,20 @@ public class ThreadPool : IDisposable
     public void Dispose()
     {
         _shouldInterrupt = true;
-
+        
+        foreach (var lockObj in _queueLocks)
+        {
+            lock (lockObj)
+            {
+                Monitor.PulseAll(lockObj);
+            }
+        }
+        
         foreach (var worker in _workers)
         {
             worker.Join();
         }
-
-        foreach (var mutex in _queueLocks)
-        {
-            mutex.Dispose();
-        }
+        
+        _consoleMutex.Dispose();
     }
 }

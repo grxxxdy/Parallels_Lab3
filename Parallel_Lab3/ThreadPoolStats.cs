@@ -2,7 +2,7 @@
 
 namespace Parallel_Lab3;
 
-public class ThreadPoolStats
+public class ThreadPoolStats : IDisposable
 {
     public int totalTasks;
     public int finishedTasks;
@@ -12,6 +12,9 @@ public class ThreadPoolStats
     public List<double> fullQueueTimes;
 
     private List<Stopwatch> _fullQueueStopwatches;
+    private Stopwatch _totalTimeStopwatch;
+
+    private long _totalExecutionTime;
 
     private Mutex _taskFinishMutex;
     private Mutex _tasksWaitMutex;
@@ -27,6 +30,8 @@ public class ThreadPoolStats
         fullQueueTimes = new List<double>();
         
         _fullQueueStopwatches = new List<Stopwatch>();
+        _totalTimeStopwatch = new Stopwatch();
+        
         _taskFinishMutex = new Mutex();
         _tasksWaitMutex = new Mutex();
         _tasksExecuteMutex = new Mutex();
@@ -36,6 +41,17 @@ public class ThreadPoolStats
             fullQueueTimes.Add(0);
             _fullQueueStopwatches.Add(new Stopwatch());
         }
+    }
+
+    public void StartExecutionTimeMeasure()
+    {
+        _totalTimeStopwatch.Restart();
+    }
+    
+    public void StopExecutionTimeMeasure()
+    {
+        _totalTimeStopwatch.Stop();
+        _totalExecutionTime = _totalTimeStopwatch.ElapsedMilliseconds;
     }
 
     public void AddFinishedTask()
@@ -82,5 +98,14 @@ public class ThreadPoolStats
         Console.WriteLine($"Minimum time of a queue being full: {(fullQueueTimes.Any() ? fullQueueTimes.Min() : 0)}");
         Console.WriteLine($"Tasks discarded: {totalDiscards}/{totalTasks}");
         Console.WriteLine("____________________________________________");
+        Console.WriteLine($"Total execution time: {_totalExecutionTime}");
+        Console.WriteLine("____________________________________________");
+    }
+
+    public void Dispose()
+    {
+        _taskFinishMutex.Dispose();
+        _tasksWaitMutex.Dispose();
+        _tasksExecuteMutex.Dispose();
     }
 }

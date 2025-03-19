@@ -12,14 +12,18 @@ class Program
 
         ThreadPoolStats stats = new ThreadPoolStats(queueAmnt);
         ThreadPool threadPool = new ThreadPool(queueAmnt, threadsPerQueue, queueCapacity, stats);
-
+        
+        stats.StartExecutionTimeMeasure();
+        
         for (int i = 0; i < tasksAmount; i++)
         {
             threadPool.EnqueueTask(WaitForRandomSeconds, i);
             Thread.Sleep(10);   // Test for more beautiful output
         }
-
+        
         threadPool.WaitForTasksAndFinish(tasksAmount);
+        
+        stats.StopExecutionTimeMeasure();
         
         stats.PrintStats();
     }
